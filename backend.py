@@ -1,4 +1,10 @@
 from flask import Flask, jsonify
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)
+
+from flask import Flask, jsonify
 import requests
 import xml.etree.ElementTree as ET
 
