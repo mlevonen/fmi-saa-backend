@@ -1,14 +1,12 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-
-app = Flask(__name__)
-CORS(app)
-
-from flask import Flask, jsonify
 import requests
 import xml.etree.ElementTree as ET
 
 app = Flask(__name__)
+
+# 🔥 SALLI CORS KAIKILLE POLUILLE
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 FMI_WFS = "https://opendata.fmi.fi/wfs"
 
