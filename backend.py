@@ -10,6 +10,14 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 FMI_WFS = "https://opendata.fmi.fi/wfs"
 
+# ✅ PAKOLLINEN USER-AGENT FMI:lle (Render / pilvipalvelut)
+HEADERS = {
+    "User-Agent": "mle-saa-kartta/1.0 (https://mlevonen.github.io)"
+}
+
+# ---------------------------
+# HAVAINNOT
+# ---------------------------
 @app.route("/api/observations")
 def observations():
     url = (
@@ -17,7 +25,9 @@ def observations():
         "storedquery_id=fmi::observations::weather::simple&"
         "parameters=t2m,ws_10min&latest=true"
     )
-    r = requests.get(url, timeout=30)
+
+    # 🔑 USER-AGENT LISÄTTY
+    r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
 
     root = ET.fromstring(r.text)
@@ -32,6 +42,7 @@ def observations():
         pos = m.find(".//gml:pos", ns)
         pname = m.find(".//bs:ParameterName", ns)
         pval = m.find(".//bs:ParameterValue", ns)
+
         if pos is None or pname is None or pval is None:
             continue
 
@@ -43,6 +54,7 @@ def observations():
 
         if pname.text == "t2m" and pval.text != "NaN":
             data[key]["t2m"] = float(pval.text)
+
         if pname.text == "ws_10min" and pval.text != "NaN":
             data[key]["ws"] = float(pval.text)
 
@@ -50,7 +62,10 @@ def observations():
     for s in data.values():
         features.append({
             "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [s["lon"], s["lat"]]},
+            "geometry": {
+                "type": "Point",
+                "coordinates": [s["lon"], s["lat"]]
+            },
             "properties": {
                 "name": f"Sääasema {s['lat']:.2f}, {s['lon']:.2f}",
                 "t2m": s["t2m"],
@@ -58,8 +73,15 @@ def observations():
             }
         })
 
-    return jsonify({"type": "FeatureCollection", "features": features})
+    return jsonify({
+        "type": "FeatureCollection",
+        "features": features
+    })
 
+
+# ---------------------------
+# ENNUSTE
+# ---------------------------
 @app.route("/api/forecast")
 def forecast():
     url = (
@@ -67,7 +89,9 @@ def forecast():
         "storedquery_id=fmi::forecast::harmonie::surface::grid&"
         "parameters=t2m&bbox=19,59,32,71&timestep=360"
     )
-    r = requests.get(url, timeout=30)
+
+    # 🔑 USER-AGENT LISÄTTY
+    r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
 
     root = ET.fromstring(r.text)
@@ -81,16 +105,27 @@ def forecast():
     for m in root.findall(".//wfs:member", ns):
         pos = m.find(".//gml:pos", ns)
         val = m.find(".//bs:ParameterValue", ns)
+
         if pos is None or val is None:
             continue
+
         lat, lon = map(float, pos.text.split())
         features.append({
             "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [lon, lat]},
-            "properties": {"t2m": float(val.text)}
+            "geometry": {
+                "type": "Point",
+                "coordinates": [lon, lat]
+            },
+            "properties": {
+                "t2m": float(val.text)
+            }
         })
 
-    return jsonify({"type": "FeatureCollection", "features": features})
+    return jsonify({
+        "type": "FeatureCollection",
+        "features": features
+    })
+
 
 if __name__ == "__main__":
     app.run(port=8002, debug=True)
