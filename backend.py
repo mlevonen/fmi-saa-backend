@@ -4,20 +4,27 @@ import requests
 import xml.etree.ElementTree as ET
 
 app = Flask(__name__)
-
-# 🔥 SALLI CORS KAIKILLE POLUILLE
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 FMI_WFS = "https://opendata.fmi.fi/wfs"
 
-# ✅ PAKOLLINEN USER-AGENT FMI:lle (Render / pilvipalvelut)
 HEADERS = {
-    "User-Agent": "mle-saa-kartta/1.0 (https://mlevonen.github.io)"
+    "User-Agent": "mle-saa-kartta/1.0 (contact: github.com/mlevonen)"
 }
 
-# ---------------------------
+# -------------------------------------------------
+# APU: hae elementti riippumatta namespacesta
+# -------------------------------------------------
+def find_any(elem, tag):
+    for e in elem.iter():
+        if e.tag.endswith(tag):
+            return e
+    return None
+
+
+# -------------------------------------------------
 # HAVAINNOT
-# ---------------------------
+# -------------------------------------------------
 @app.route("/api/observations")
 def observations():
     url = (
@@ -26,36 +33,39 @@ def observations():
         "parameters=t2m,ws_10min&latest=true"
     )
 
-    # 🔑 USER-AGENT LISÄTTY
     r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
 
     root = ET.fromstring(r.text)
-    ns = {
-        "wfs": "http://www.opengis.net/wfs/2.0",
-        "gml": "http://www.opengis.net/gml/3.2",
-        "bs": "http://xml.fmi.fi/schema/wfs/2.0"
-    }
-
     data = {}
-    for m in root.findall(".//wfs:member", ns):
-        pos = m.find(".//gml:pos", ns)
-        pname = m.find(".//bs:ParameterName", ns)
-        pval = m.find(".//bs:ParameterValue", ns)
 
-        if pos is None or pname is None or pval is None:
+    for member in root.iter():
+        if not member.tag.endswith("member"):
+            continue
+
+        pos = find_any(member, "pos")
+        pname = find_any(member, "ParameterName")
+        pval = find_any(member, "ParameterValue")
+
+        if not pos or not pname or not pval:
+            continue
+        if pval.text == "NaN":
             continue
 
         lat, lon = map(float, pos.text.split())
         key = (round(lat, 4), round(lon, 4))
 
         if key not in data:
-            data[key] = {"lat": lat, "lon": lon, "t2m": None, "ws": None}
+            data[key] = {
+                "lat": lat,
+                "lon": lon,
+                "t2m": None,
+                "ws": None
+            }
 
-        if pname.text == "t2m" and pval.text != "NaN":
+        if pname.text == "t2m":
             data[key]["t2m"] = float(pval.text)
-
-        if pname.text == "ws_10min" and pval.text != "NaN":
+        elif pname.text == "ws_10min":
             data[key]["ws"] = float(pval.text)
 
     features = []
@@ -73,15 +83,13 @@ def observations():
             }
         })
 
-    return jsonify({
-        "type": "FeatureCollection",
-        "features": features
-    })
+    print("OBS FEATURES:", len(features))
+    return jsonify({"type": "FeatureCollection", "features": features})
 
 
-# ---------------------------
-# ENNUSTE
-# ---------------------------
+# -------------------------------------------------
+# ENNUSTE (grid → harvennetaan frontendissä)
+# -------------------------------------------------
 @app.route("/api/forecast")
 def forecast():
     url = (
@@ -90,26 +98,24 @@ def forecast():
         "parameters=t2m&bbox=19,59,32,71&timestep=360"
     )
 
-    # 🔑 USER-AGENT LISÄTTY
     r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
 
     root = ET.fromstring(r.text)
-    ns = {
-        "wfs": "http://www.opengis.net/wfs/2.0",
-        "gml": "http://www.opengis.net/gml/3.2",
-        "bs": "http://xml.fmi.fi/schema/wfs/2.0"
-    }
-
     features = []
-    for m in root.findall(".//wfs:member", ns):
-        pos = m.find(".//gml:pos", ns)
-        val = m.find(".//bs:ParameterValue", ns)
 
-        if pos is None or val is None:
+    for member in root.iter():
+        if not member.tag.endswith("member"):
+            continue
+
+        pos = find_any(member, "pos")
+        val = find_any(member, "ParameterValue")
+
+        if not pos or not val or val.text == "NaN":
             continue
 
         lat, lon = map(float, pos.text.split())
+
         features.append({
             "type": "Feature",
             "geometry": {
@@ -121,11 +127,9 @@ def forecast():
             }
         })
 
-    return jsonify({
-        "type": "FeatureCollection",
-        "features": features
-    })
+    print("FC FEATURES:", len(features))
+    return jsonify({"type": "FeatureCollection", "features": features})
 
 
 if __name__ == "__main__":
-    app.run(port=8002, debug=True)
+    app.run(host="0.0.0.0", port=8002, debug=True)
